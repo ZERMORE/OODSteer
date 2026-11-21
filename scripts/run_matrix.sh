@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Run from project root after pip install -e .
+# Default checkout: /home/wxh/projects/OODSteer
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 PRESET="${1:-qwen3b}"
 MODEL="${2:-Qwen/Qwen2.5-3B-Instruct}"
 RUN="${3:-main}"

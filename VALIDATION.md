@@ -13,3 +13,7 @@
 ## 服务器共享路径更新
 
 默认根目录 `/home/wxh/wdl/data` 已写入 paths.py。模型缓存放 models/huggingface，数据集处理缓存放 datasets/huggingface，StrategyQA 默认文件放 datasets/strategyqa。结果和批量日志放 results/OODSteer 与 logs/OODSteer。通过临时目录检查缓存环境变量配置、数据集 cache_dir 传递和 StrategyQA 默认读取；未访问服务器文件系统，也未迁移历史数据。
+
+## 与旧项目路径对齐
+
+服务器代码目录统一为 /home/wxh/projects/OODSteer；主缓存改为 /home/wxh/wdl/data/cache/huggingface，与 OODmethod 一致。新增旧数据集缓存回退、recipe revision 复用、完整模型 checkpoint 复用测试。服务器真实缓存与网络加载仍需首次 smoke 检查。

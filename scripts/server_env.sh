@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# source scripts/server_env.sh before installing/downloading manually.
+export OODSTEER_DATA_ROOT="${OODSTEER_DATA_ROOT:-/home/wxh/wdl/data}"
+export HF_HOME="$OODSTEER_DATA_ROOT/cache/huggingface"
+export HF_HUB_CACHE="$HF_HOME/hub"
+export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
+export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
+export HF_DATASETS_CACHE="$HF_HOME/datasets"
+export HF_ASSETS_CACHE="$HF_HOME/assets"
+export HF_XET_CACHE="$HF_HOME/xet"
+export PIP_CACHE_DIR="$OODSTEER_DATA_ROOT/cache/pip"
+export TORCH_HOME="$OODSTEER_DATA_ROOT/cache/torch"
+export TMPDIR="$OODSTEER_DATA_ROOT/tmp"
+export CONDA_PKGS_DIRS="$OODSTEER_DATA_ROOT/conda/pkgs"
+mkdir -p "$HF_HUB_CACHE" "$HF_DATASETS_CACHE" "$HF_ASSETS_CACHE" "$HF_XET_CACHE" "$PIP_CACHE_DIR" "$TORCH_HOME" "$TMPDIR" "$CONDA_PKGS_DIRS"

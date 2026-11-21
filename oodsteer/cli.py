@@ -14,6 +14,7 @@ def main():
     p.add_argument("--task", choices=["csqa", "strategyqa", "gsm8k", "aqua"], required=True)
     p.add_argument("--method", choices=["standard", "usteer"], default="usteer")
     p.add_argument("--prompt-file", required=True, help="Few-shot Q/A prefix, UTF-8 text")
+    p.add_argument("--reuse-recipe", help="OODmethod recipe.json; default auto-detect matched/main paper run")
     p.add_argument("--data-root", help="Storage root; default OODSTEER_DATA_ROOT or /home/wxh/wdl/data")
     p.add_argument("--data", help="Local JSONL; StrategyQA defaults to datasets/strategyqa/strategyqa-dev.jsonl under data root")
     p.add_argument("--output", help="Results JSONL; default results/OODSteer/<preset>/<task>-<method>.jsonl under data root")
@@ -50,7 +51,8 @@ def main():
     prefix = Path(a.prompt_file).read_text(encoding="utf-8")
     if not prefix.strip():
         p.error("Empty prompt prefix")
-    rows = load(a.task, a.data, a.allow_partial)
+    dataset_source = {}
+    rows = load(a.task, a.data, a.allow_partial, recipe=a.reuse_recipe, metadata=dataset_source)
     if a.limit:
         rows = rows[:a.limit]
     out = Path(a.output)
@@ -61,8 +63,11 @@ def main():
     alpha = a.alpha if a.alpha is not None else alphas[a.preset][["csqa","strategyqa","gsm8k","aqua"].index(a.task)]
     depth = a.depth if a.depth is not None else {"llama1b":3,"qwen3b":8,"qwen14b":3}[a.preset]
     set_seed(a.seed)
-    tok = AutoTokenizer.from_pretrained(a.model, cache_dir=str(paths["models"]))
-    model = AutoModelForCausalLM.from_pretrained(a.model, cache_dir=str(paths["models"]), torch_dtype=getattr(torch,a.dtype), attn_implementation="eager").to(a.device).eval()
+    from .paths import resolve_model
+    model_source = resolve_model(a.model)
+    print("Model source:", model_source, flush=True)
+    tok = AutoTokenizer.from_pretrained(model_source, cache_dir=str(paths["models"]))
+    model = AutoModelForCausalLM.from_pretrained(model_source, cache_dir=str(paths["models"]), torch_dtype=getattr(torch,a.dtype), attn_implementation="eager").to(a.device).eval()
     expected_layers = {"llama1b":16,"qwen3b":36,"qwen14b":48}[a.preset]
     if model.config.num_hidden_layers != expected_layers:
         raise ValueError("Model layer count does not match preset; use the documented model")
@@ -70,7 +75,7 @@ def main():
     layers = [int(x) for x in a.layers.split(",")] if a.layers else intermediate_layers(model.config.num_hidden_layers, depth)
     if tok.pad_token_id is None:
         tok.pad_token_id = tok.eos_token_id
-    meta = dict(vars(a), storage={k:str(v) for k,v in paths.items()}, resolved_alpha=alpha, resolved_layers=layers, torch=torch.__version__, transformers=transformers.__version__, python=platform.python_version(), model_config=model.config.to_dict(), prompt_sha256=hashlib.sha256(prefix.encode()).hexdigest(), data_sha256=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest())
+    meta = dict(vars(a), dataset_source=dataset_source, model_source=model_source, storage={k:str(v) for k,v in paths.items()}, resolved_alpha=alpha, resolved_layers=layers, torch=torch.__version__, transformers=transformers.__version__, python=platform.python_version(), model_config=model.config.to_dict(), prompt_sha256=hashlib.sha256(prefix.encode()).hexdigest(), data_sha256=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest())
     out.with_suffix(".meta.json").write_text(json.dumps(meta,indent=2,ensure_ascii=False),encoding="utf-8")
     manager = USteer(model,layers,alpha,a.scope) if a.method == "usteer" else contextlib.nullcontext()
     def sync():

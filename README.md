@@ -34,12 +34,16 @@
 
 ## Linux / Conda 服务器操作
 
-把整个目录上传到服务器，例如 `~/methods/OODSteer`，以下命令在此目录执行。建议先用 Qwen3B（无 Llama 访问授权门槛）。以下采用 PyTorch 2.5.1 CUDA 12.1 wheel；服务器驱动应兼容 CUDA 12.1。系统不必安装同版本 CUDA toolkit。若驱动不兼容，先选匹配驱动的官方 PyTorch wheel。
+服务器代码固定放在 `/home/wxh/projects/OODSteer`，大文件根目录为 `/home/wxh/wdl/data`。以下命令在代码目录执行。建议先用 Qwen3B（无 Llama 访问授权门槛）。以下采用 PyTorch 2.5.1 CUDA 12.1 wheel；服务器驱动应兼容 CUDA 12.1。系统不必安装同版本 CUDA toolkit。若驱动不兼容，先选匹配驱动的官方 PyTorch wheel。
 
 ```bash
-cd ~/methods/OODSteer
-conda create -n oodsteer python=3.10 -y
-conda activate oodsteer
+mkdir -p /home/wxh/projects
+cd /home/wxh/projects
+git clone https://github.com/ZERMORE/OODSteer.git
+cd OODSteer
+source scripts/server_env.sh
+conda create -p /home/wxh/wdl/data/conda/envs/oodsteer python=3.10 -y
+conda activate /home/wxh/wdl/data/conda/envs/oodsteer
 python -m pip install --upgrade pip
 python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 python -m pip install -e .
@@ -48,7 +52,8 @@ nvidia-smi
 python scripts/check_env.py
 python -m unittest discover -s tests -v
 python -m compileall -q oodsteer scripts tests
-python -m pip freeze > environment-resolved.txt
+mkdir -p /home/wxh/wdl/data/logs/OODSteer
+python -m pip freeze > /home/wxh/wdl/data/logs/OODSteer/environment-resolved.txt
 ```
 
 推荐单张支持 BF16 的 GPU。1B/3B 可从 16–24 GB 显存尝试（工程估计，随上下文长度变化）；14B 建议 48–80 GB。当前加载为单设备完整权重，不支持量化、跨卡 sharding、vLLM。非 BF16 GPU 可用 `--dtype float16`，记录精度差异。论文 latency 使用 A100 80GB，本实现未针对其低延迟做 kernel 优化，不能假定同等开销。
@@ -56,17 +61,23 @@ python -m pip freeze > environment-resolved.txt
 存储路径已编码到 `oodsteer/paths.py`，不需要手动 export HF_HOME。默认使用以下服务器目录：
 
 ```text
+/home/wxh/projects/OODSteer/       # Git 代码仓库
 /home/wxh/wdl/data/
-├── models/huggingface/           # 模型、tokenizer 和 Hub 下载缓存
-├── datasets/huggingface/         # HF 数据集 Arrow / 处理缓存
+├── models/                       # 先前项目的固定 revision 权重，可通过 --model 直接指定
+├── cache/huggingface/
+│   ├── hub/                      # 新下载的模型、tokenizer 与 Hub 数据集文件；与 OODmethod 共用
+│   ├── datasets/                 # HF 数据集处理缓存；与 OODmethod 共用
+│   ├── assets/
+│   └── xet/
+├── huggingface/                  # OODExplore 旧缓存，只读探测复用
 ├── datasets/strategyqa/strategyqa-dev.jsonl
-├── huggingface/                 # HF 配置和认证等运行文件
-├── cache/huggingface-assets/     # HF 辅助缓存
-├── results/OODSteer/             # 结果及 meta 文件
-└── logs/OODSteer/                # 批量实验日志
+├── results/OODSteer/
+├── logs/OODSteer/
+├── conda/envs/oodsteer/
+└── tmp/
 ```
 
-`--data-root` 优先于 `OODSTEER_DATA_ROOT`，其次为上述默认路径。程序在导入 Hugging Face 库前配置缓存，并显式传入模型/数据集 cache_dir；会覆盖通用 HF 缓存环境变量，以保证项目路径一致。`--data`、`--output` 仍可指定单个文件路径。单次运行不传 `--output` 时，保存到 `results/OODSteer/<preset>/<task>-<method>.jsonl`（位于 data root 下）。批量脚本按 RUN 和 preset 建结果目录并将 stdout/stderr 保存到 logs/OODSteer。已有缓存文件不会自动迁移；若目标目录未命中缓存，将重新下载。数据和缓存目录需有写权限。网络受限时，在联网机器下载模型 snapshot/数据后上传，模型用本地路径，数据用下面的 JSONL 格式。Llama 模型需先获得模型访问权，再用 `HF_HOME=/home/wxh/wdl/data/huggingface huggingface-cli login` 登录（与代码使用同一认证目录）。
+`--data-root` 优先于 `OODSTEER_DATA_ROOT`，其次为上述默认路径。程序在导入 Hugging Face 库前配置缓存，并显式传入模型/数据集 cache_dir；会覆盖通用 HF 缓存环境变量，以保证项目路径一致。`--data`、`--output` 仍可指定单个文件路径。单次运行不传 `--output` 时，保存到 `results/OODSteer/<preset>/<task>-<method>.jsonl`（位于 data root 下）。批量脚本按 RUN 和 preset 建结果目录并将 stdout/stderr 保存到 logs/OODSteer。已有缓存文件不会自动迁移；若目标目录未命中缓存，将重新下载。数据和缓存目录需有写权限。网络受限时，在联网机器下载模型 snapshot/数据后上传，模型用本地路径，数据用下面的 JSONL 格式。Llama 模型需先获得模型访问权，再用 `HF_HOME=/home/wxh/wdl/data/cache/huggingface huggingface-cli login` 登录（与代码使用同一认证目录）。
 
 先做服务器小样本 smoke（这里才会下载模型和运行推理）：
 
@@ -113,3 +124,22 @@ done
 论文 Table 1 的 Standard → USteer：Llama1B CSQA 50.94→54.05、StrategyQA 58.52→63.32、GSM8K 34.19→36.24、AQuA 37.80→39.37；Qwen3B 分别 77.72→79.20、68.56→70.74、79.91→80.97、54.72→55.12。这里仅列原文参考值，本项目没有生成实验结果。原文 Appendix C 说明 greedy 的区间不足以支持确定的显著性结论。
 
 本地验证记录见 `VALIDATION.md`。首次服务器真实运行后，应保留 resolved 环境、模型 snapshot revision、完整日志及结果文件，才能进一步核查与论文数字的差异。
+
+## 复用先前项目与日常同步
+
+```bash
+cd /home/wxh/projects/OODSteer
+git pull --ff-only origin main
+source scripts/server_env.sh
+conda activate /home/wxh/wdl/data/conda/envs/oodsteer
+python -m pip install -e .
+python -m unittest discover -s tests -v
+```
+
+代码不自动迁移已有数据。数据加载按顺序尝试 `cache/huggingface/datasets`（OODmethod）、`huggingface/datasets`（OODExplore）、`datasets/huggingface`（此前 OODSteer）；尝试时禁止下载文件，未命中后才用主缓存正常加载。缓存兼容性受 datasets 版本影响，程序会打印命中路径，不能保证所有旧 Arrow 缓存都能跨版本复用。
+
+默认依次查找 `results/OODmethod/qwen25-paper-v4-matched/recipe.json` 和 `results/OODmethod/qwen25-paper-v4/recipe.json`，沿用其中三个数据集的 revision。可显式指定 `--reuse-recipe /path/to/recipe.json`；repo/config/split 不匹配会报错，不悄悄换数据。无 recipe 时使用数据集默认版本。meta 中记录 recipe、revision、缓存路径和数据 fingerprint。StrategyQA 仍需单独准备。
+
+模型按相同 HF repo 检查 `cache/huggingface/hub`、`huggingface/hub`、`models/huggingface` 的 main snapshot，只有权重完整才复用。传入本地 `--model /path/to/checkpoint` 会直接使用该目录。程序不将 Qwen2.5-7B 或 Qwen2.5-VL-3B 当作主实验 Qwen2.5-3B；旧权重不同型号时仍需下载。固定 commit 子目录可直接作为 --model，程序不猜测旧 models 目录中的任意版本。
+
+若历史文件实际在 `/mnt/data/wxh/wdl`，可用 `--data-root /mnt/data/wxh/wdl`，或显式提供旧 recipe / checkpoint 路径。不同根目录的缓存不会自动混用。
