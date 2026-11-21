@@ -4,6 +4,35 @@
 
 截至本次核查（2026-11-21），未找到可确认的官方公开代码。论文 checklist 的 Open access to data and code 明确回答 No，说明 release 尚需 legal/compliance review。本目录是独立实现，尚未运行真实模型实验，不声称已复现论文表格。
 
+## 一键检查与启动（推荐入口）
+
+服务器首次同步后，只需：
+
+```bash
+cd /home/wxh/projects/OODSteer
+git pull --ff-only origin main
+bash run.sh setup     # 首次创建/更新 oodsteer 环境和依赖
+bash run.sh smoke     # 自动检查，然后运行 GSM8K 两种方法各 3 题
+bash run.sh main      # 自动检查，然后运行完整实验
+```
+
+环境已安装时，日常更新后执行 `bash run.sh main` 即可，无需手动 source、activate 或设置 HF_HOME。只检查可执行 `bash run.sh check`。`setup` 固定安装 PyTorch 2.5.1 CUDA 12.1 wheel，要求服务器驱动兼容；沿用可用代理，不会修改网络配置，代理连接问题仍需解决。
+
+脚本自动加载 `scripts/server_env.sh`、通过 `conda run -n oodsteer` 使用命名环境，将 Hugging Face、pip、torch、Conda 缓存及临时文件写到数据盘。自动检查依赖、GPU 和单元测试；推理默认按 GPU 能力选择 BF16/FP16，并在日志中记录。默认继承 CUDA_VISIBLE_DEVICES，不改动已有 GPU 分配。
+
+`main` 默认运行 Qwen2.5-3B-Instruct 的 CSQA、GSM8K、AQuA，各有 Standard/USteer；若默认 StrategyQA 文件存在，再加入该任务并由数据加载器核验数量。缺失时明确打印跳过，不会声称已完成四任务。
+
+```bash
+bash run.sh main --gpu 0                     # 显式指定 GPU
+bash run.sh main --tasks gsm8k               # 只跑一个任务
+bash run.sh main --tasks csqa gsm8k aqua strategyqa  # 严格要求四任务，缺文件时报错
+bash run.sh main --run-name qwen3b-first      # 指定独立结果目录名
+```
+
+每次默认创建带时间戳的独立目录：`/home/wxh/wdl/data/results/OODSteer/<run>/qwen3b/` 保存逐题结果和 summary.json；`logs/OODSteer/<run>/qwen3b/` 保存日志、配置和完整软件版本。原有 cache/recipe 复用逻辑自动生效。命令失败立即停止，输出保留；当前不支持断点续跑，重跑会创建新目录。
+
+运行过程中保持终端连接，长任务可在 tmux 中执行。旧的逐步操作和底层接口说明保留在下文，通常不需要手动执行。
+
 ## 实现范围与依据
 
 - `oodsteer/steering.py` 实现 Eq. 2、3、6–8 和 Algorithm 1：逐层 logit lens，选当前层 argmax token 的 unembedding weight，解析 NCI 梯度，经最终 RMSNorm Jacobian 回到原 hidden state，再加 alpha 倍单位梯度。不训练、不改变权重、不需要 backward。
@@ -42,8 +71,8 @@ cd /home/wxh/projects
 git clone https://github.com/ZERMORE/OODSteer.git
 cd OODSteer
 source scripts/server_env.sh
-conda create -p /home/wxh/wdl/data/conda/envs/oodsteer python=3.10 -y
-conda activate /home/wxh/wdl/data/conda/envs/oodsteer
+conda create -n oodsteer python=3.10 -y
+conda activate oodsteer
 python -m pip install --upgrade pip
 python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 python -m pip install -e .
@@ -131,7 +160,7 @@ done
 cd /home/wxh/projects/OODSteer
 git pull --ff-only origin main
 source scripts/server_env.sh
-conda activate /home/wxh/wdl/data/conda/envs/oodsteer
+conda activate oodsteer
 python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
@@ -143,3 +172,5 @@ python -m unittest discover -s tests -v
 模型按相同 HF repo 检查 `cache/huggingface/hub`、`huggingface/hub`、`models/huggingface` 的 main snapshot，只有权重完整才复用。传入本地 `--model /path/to/checkpoint` 会直接使用该目录。程序不将 Qwen2.5-7B 或 Qwen2.5-VL-3B 当作主实验 Qwen2.5-3B；旧权重不同型号时仍需下载。固定 commit 子目录可直接作为 --model，程序不猜测旧 models 目录中的任意版本。
 
 若历史文件实际在 `/mnt/data/wxh/wdl`，可用 `--data-root /mnt/data/wxh/wdl`，或显式提供旧 recipe / checkpoint 路径。不同根目录的缓存不会自动混用。
+
+Conda 环境统一命名为 `oodsteer`。先执行 `source scripts/server_env.sh`，脚本将数据盘的 `conda/envs` 加入 `CONDA_ENVS_PATH`，再使用 `conda create -n oodsteer` 和 `conda activate oodsteer`。新环境仍落在 `/home/wxh/wdl/data/conda/envs/oodsteer`。该操作不重命名或迁移服务器已有环境。

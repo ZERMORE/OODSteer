@@ -17,3 +17,7 @@
 ## 与旧项目路径对齐
 
 服务器代码目录统一为 /home/wxh/projects/OODSteer；主缓存改为 /home/wxh/wdl/data/cache/huggingface，与 OODmethod 一致。新增旧数据集缓存回退、recipe revision 复用、完整模型 checkpoint 复用测试。服务器真实缓存与网络加载仍需首次 smoke 检查。
+
+## 统一启动入口
+
+新增 run.sh 与 scripts/server.py，支持 setup/check/smoke/main。新增任务选择、实验参数和真实子进程失败日志的 3 项检查，总计 9 项测试。未运行 GPU 模型实验；本机 WSL Bash 不可用，Shell/Conda 入口尚需服务器首次执行验证。
