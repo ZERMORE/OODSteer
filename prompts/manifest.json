@@ -1,0 +1,18 @@
+{
+  "gsm8k": {
+    "sha256": "d1766696df4f2ae43d15eec6fa603e7c7335dc5d40f45dbf597135cb5da21964",
+    "shots": 8
+  },
+  "csqa": {
+    "sha256": "78e211abc69a724d5fedeeb24a6541a52c90825953f6d8fc122b1a74c4244048",
+    "shots": 7
+  },
+  "strategyqa": {
+    "sha256": "239be311da8b8ab681b75e4f21e20ceb2d8c78b7681631026435d93fc78ceb68",
+    "shots": 6
+  },
+  "aqua": {
+    "sha256": "d06ae62913f4192633cfde5d05be3d4003e727f1ecb6454a2f87444aca8be394",
+    "shots": 4
+  }
+}
