@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Run from project root. Model may also be a local model directory.
+# Run from project root after pip install -e .
 PRESET="${1:-qwen3b}"
 MODEL="${2:-Qwen/Qwen2.5-3B-Instruct}"
 RUN="${3:-main}"
+DATA_ROOT="${OODSTEER_DATA_ROOT:-/home/wxh/wdl/data}"
+RESULT_DIR="$DATA_ROOT/results/OODSteer/$RUN/$PRESET"
+LOG_DIR="$DATA_ROOT/logs/OODSteer/$RUN/$PRESET"
+mkdir -p "$RESULT_DIR" "$LOG_DIR"
 for task in csqa strategyqa gsm8k aqua; do
-  extra=()
-  if [[ "$task" == strategyqa ]]; then
-    extra+=(--data data/strategyqa-dev.jsonl)
-  fi
   for method in standard usteer; do
-    python -m oodsteer.cli --model "$MODEL" --preset "$PRESET" --task "$task"       --method "$method" --prompt-file "prompts/$task.txt" "${extra[@]}"       --output "results/$RUN/$PRESET/$task-$method.jsonl"
+    result="$RESULT_DIR/$task-$method.jsonl"
+    log="$LOG_DIR/$task-$method.log"
+    if [[ -e "$result" || -e "$log" ]]; then
+      echo "Output already exists; choose a fresh RUN: $result / $log" >&2
+      exit 1
+    fi
+    python -u -m oodsteer.cli --data-root "$DATA_ROOT" --model "$MODEL" --preset "$PRESET" --task "$task" --method "$method" --prompt-file "prompts/$task.txt" --output "$result" 2>&1 | tee "$log"
   done
 done
-python -m oodsteer.report results/"$RUN"/"$PRESET"/*.jsonl
+python -m oodsteer.report "$RESULT_DIR"/*.jsonl

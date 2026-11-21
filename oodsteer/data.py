@@ -29,7 +29,13 @@ def extract(text, task):
 
 
 def load(task, local=None, allow_partial=False):
+    from .paths import storage_paths
+    paths = storage_paths()
+    if task == "strategyqa" and local is None:
+        local = paths["strategyqa"]
     if local:
+        if not Path(local).is_file():
+            raise FileNotFoundError(f"Dataset file missing: {local}; provide the original dev set or use --data")
         rows = [json.loads(s) for s in Path(local).read_text(encoding="utf-8").splitlines() if s.strip()]
         for r in rows:
             if not all(k in r for k in ("id", "question", "answer")):
@@ -37,13 +43,13 @@ def load(task, local=None, allow_partial=False):
     else:
         from datasets import load_dataset
         if task == "csqa":
-            ds = load_dataset("tau/commonsense_qa", split="validation")
+            ds = load_dataset("tau/commonsense_qa", split="validation", cache_dir=str(paths["datasets"]))
             rows = [dict(id=r["id"], question=r["question"], choices=[f"({k}) {v}" for k,v in zip(r["choices"]["label"], r["choices"]["text"])], answer=r["answerKey"]) for r in ds]
         elif task == "gsm8k":
-            ds = load_dataset("openai/gsm8k", "main", split="test")
+            ds = load_dataset("openai/gsm8k", "main", split="test", cache_dir=str(paths["datasets"]))
             rows = [dict(id=str(i), question=r["question"], answer=str(Decimal(r["answer"].split("####")[-1].strip().replace(",", "")).normalize())) for i,r in enumerate(ds)]
         elif task == "aqua":
-            ds = load_dataset("deepmind/aqua_rat", "raw", split="validation")
+            ds = load_dataset("deepmind/aqua_rat", "raw", split="validation", cache_dir=str(paths["datasets"]))
             rows = [dict(id=str(i), question=r["question"], choices=r["options"], answer=r["correct"]) for i,r in enumerate(ds)]
         else:
             raise ValueError("StrategyQA: provide original 229-example dev set via --data; never substitute a random split")

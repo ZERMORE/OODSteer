@@ -14,7 +14,7 @@
 
 ## 关键设置与不确定细节
 
-论文 §4.1 设置：CSQA validation 1221；StrategyQA dev 229；GSM8K test 1319；AQuA validation 254。程序默认检查完整集大小。StrategyQA 的 229 条 dev 的确切 ID/划分没有在已核查原文中提供，本项目要求提供已确认来源的 dev 文件，不能用任意 229 条或随机切分替代并声称精确复现。
+论文 §4.1 设置：CSQA validation 1221；StrategyQA dev 229；GSM8K test 1319；AQuA validation 254。程序默认检查完整集大小。StrategyQA 的 229 条 dev 的确切 ID/划分没有在已核查原文中提供，本项目默认读取 `/home/wxh/wdl/data/datasets/strategyqa/strategyqa-dev.jsonl`，需提供已确认来源的 dev 文件，不能用任意 229 条或随机切分替代并声称精确复现。
 
 | 模型 preset | 深度 | CSQA alpha | StrategyQA | GSM8K | AQuA |
 |---|---:|---:|---:|---:|---:|
@@ -53,28 +53,41 @@ python -m pip freeze > environment-resolved.txt
 
 推荐单张支持 BF16 的 GPU。1B/3B 可从 16–24 GB 显存尝试（工程估计，随上下文长度变化）；14B 建议 48–80 GB。当前加载为单设备完整权重，不支持量化、跨卡 sharding、vLLM。非 BF16 GPU 可用 `--dtype float16`，记录精度差异。论文 latency 使用 A100 80GB，本实现未针对其低延迟做 kernel 优化，不能假定同等开销。
 
-可设置 `export HF_HOME=/your/cache/huggingface`。网络受限时，在联网机器下载模型 snapshot/数据后上传，模型用本地路径，数据用下面的 JSONL 格式。Llama 模型需先获得模型访问权，再用 `huggingface-cli login` 登录。
+存储路径已编码到 `oodsteer/paths.py`，不需要手动 export HF_HOME。默认使用以下服务器目录：
+
+```text
+/home/wxh/wdl/data/
+├── models/huggingface/           # 模型、tokenizer 和 Hub 下载缓存
+├── datasets/huggingface/         # HF 数据集 Arrow / 处理缓存
+├── datasets/strategyqa/strategyqa-dev.jsonl
+├── huggingface/                 # HF 配置和认证等运行文件
+├── cache/huggingface-assets/     # HF 辅助缓存
+├── results/OODSteer/             # 结果及 meta 文件
+└── logs/OODSteer/                # 批量实验日志
+```
+
+`--data-root` 优先于 `OODSTEER_DATA_ROOT`，其次为上述默认路径。程序在导入 Hugging Face 库前配置缓存，并显式传入模型/数据集 cache_dir；会覆盖通用 HF 缓存环境变量，以保证项目路径一致。`--data`、`--output` 仍可指定单个文件路径。单次运行不传 `--output` 时，保存到 `results/OODSteer/<preset>/<task>-<method>.jsonl`（位于 data root 下）。批量脚本按 RUN 和 preset 建结果目录并将 stdout/stderr 保存到 logs/OODSteer。已有缓存文件不会自动迁移；若目标目录未命中缓存，将重新下载。数据和缓存目录需有写权限。网络受限时，在联网机器下载模型 snapshot/数据后上传，模型用本地路径，数据用下面的 JSONL 格式。Llama 模型需先获得模型访问权，再用 `HF_HOME=/home/wxh/wdl/data/huggingface huggingface-cli login` 登录（与代码使用同一认证目录）。
 
 先做服务器小样本 smoke（这里才会下载模型和运行推理）：
 
 ```bash
-python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b   --task gsm8k --method standard --prompt-file prompts/gsm8k.txt   --limit 3 --max-new-tokens 128 --output results/smoke-standard.jsonl
-python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b   --task gsm8k --method usteer --prompt-file prompts/gsm8k.txt   --limit 3 --max-new-tokens 128 --output results/smoke-usteer.jsonl
-python -m oodsteer.report results/smoke-*.jsonl
+python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b   --task gsm8k --method standard --prompt-file prompts/gsm8k.txt   --limit 3 --max-new-tokens 128 --output /home/wxh/wdl/data/results/OODSteer/smoke-standard.jsonl
+python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b   --task gsm8k --method usteer --prompt-file prompts/gsm8k.txt   --limit 3 --max-new-tokens 128 --output /home/wxh/wdl/data/results/OODSteer/smoke-usteer.jsonl
+python -m oodsteer.report /home/wxh/wdl/data/results/OODSteer/smoke-*.jsonl
 ```
 
 完整跑单任务（不依赖 StrategyQA 的本地 dev）：
 
 ```bash
 for method in standard usteer; do
-  python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b     --task gsm8k --method "$method" --prompt-file prompts/gsm8k.txt     --output "results/gsm8k-$method.jsonl"
+  python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b     --task gsm8k --method "$method" --prompt-file prompts/gsm8k.txt     --output "/home/wxh/wdl/data/results/OODSteer/gsm8k-$method.jsonl"
 done
 ```
 
 准备 StrategyQA：将确认过来源的原始 229 条 dev JSON（list 或 qid->record）上传后：
 
 ```bash
-python scripts/normalize_strategyqa.py /path/to/strategyqa_dev.json data/strategyqa-dev.jsonl
+python scripts/normalize_strategyqa.py /path/to/strategyqa_dev.json /home/wxh/wdl/data/datasets/strategyqa/strategyqa-dev.jsonl
 bash scripts/run_matrix.sh qwen3b Qwen/Qwen2.5-3B-Instruct main-qwen
 bash scripts/run_matrix.sh llama1b meta-llama/Llama-3.2-1B-Instruct main-llama
 ```
@@ -85,7 +98,7 @@ bash scripts/run_matrix.sh llama1b meta-llama/Llama-3.2-1B-Instruct main-llama
 
 ```bash
 for alpha in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9; do
-  python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b     --task gsm8k --prompt-file prompts/gsm8k.txt --alpha "$alpha"     --output "results/alpha-$alpha.jsonl"
+  python -m oodsteer.cli --model Qwen/Qwen2.5-3B-Instruct --preset qwen3b     --task gsm8k --prompt-file prompts/gsm8k.txt --alpha "$alpha"     --output "/home/wxh/wdl/data/results/OODSteer/alpha-$alpha.jsonl"
 done
 # 采样实验可分别设 --temperature 0.2/0.5/0.8/1.0 与 --seed 1..5。
 # 深度与 prefill 范围敏感性：--depth 4；--scope all。

@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument("input")
-p.add_argument("output")
+p.add_argument("output", nargs="?", help="Default: <data-root>/datasets/strategyqa/strategyqa-dev.jsonl")
+p.add_argument("--data-root")
 a=p.parse_args()
 raw=json.loads(Path(a.input).read_text(encoding="utf-8"))
 if isinstance(raw,dict):
@@ -20,7 +21,8 @@ for i,r in enumerate(rows):
     if answer not in ('yes','no'):
         raise ValueError(answer)
     out.append(dict(id=str(r.get('qid',r.get('id',i))),question=r['question'],answer=answer))
-target=Path(a.output)
+from oodsteer.paths import storage_paths
+target=Path(a.output) if a.output else storage_paths(a.data_root)["strategyqa"]
 target.parent.mkdir(parents=True,exist_ok=True)
 with target.open('x',encoding='utf-8') as f:
     for r in out:

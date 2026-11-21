@@ -14,8 +14,9 @@ def main():
     p.add_argument("--task", choices=["csqa", "strategyqa", "gsm8k", "aqua"], required=True)
     p.add_argument("--method", choices=["standard", "usteer"], default="usteer")
     p.add_argument("--prompt-file", required=True, help="Few-shot Q/A prefix, UTF-8 text")
-    p.add_argument("--data", help="Normalized local JSONL; mandatory for StrategyQA")
-    p.add_argument("--output", required=True)
+    p.add_argument("--data-root", help="Storage root; default OODSTEER_DATA_ROOT or /home/wxh/wdl/data")
+    p.add_argument("--data", help="Local JSONL; StrategyQA defaults to datasets/strategyqa/strategyqa-dev.jsonl under data root")
+    p.add_argument("--output", help="Results JSONL; default results/OODSteer/<preset>/<task>-<method>.jsonl under data root")
     p.add_argument("--limit", type=int)
     p.add_argument("--allow-partial", action="store_true")
     p.add_argument("--alpha", type=float)
@@ -29,6 +30,14 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--chat", action="store_true", help="Optional deviation: apply model chat template")
     a = p.parse_args()
+    from .paths import configure_storage
+    paths = configure_storage(a.data_root)
+    a.data_root = str(paths["root"])
+    if a.task == "strategyqa" and a.data is None:
+        a.data = str(paths["strategyqa"])
+    if a.output is None:
+        a.output = str(paths["results"] / a.preset / f"{a.task}-{a.method}.jsonl")
+    print("Storage:", json.dumps({k:str(v) for k,v in paths.items()}), flush=True)
     import torch
     import transformers
     from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
@@ -52,8 +61,8 @@ def main():
     alpha = a.alpha if a.alpha is not None else alphas[a.preset][["csqa","strategyqa","gsm8k","aqua"].index(a.task)]
     depth = a.depth if a.depth is not None else {"llama1b":3,"qwen3b":8,"qwen14b":3}[a.preset]
     set_seed(a.seed)
-    tok = AutoTokenizer.from_pretrained(a.model)
-    model = AutoModelForCausalLM.from_pretrained(a.model, torch_dtype=getattr(torch,a.dtype), attn_implementation="eager").to(a.device).eval()
+    tok = AutoTokenizer.from_pretrained(a.model, cache_dir=str(paths["models"]))
+    model = AutoModelForCausalLM.from_pretrained(a.model, cache_dir=str(paths["models"]), torch_dtype=getattr(torch,a.dtype), attn_implementation="eager").to(a.device).eval()
     expected_layers = {"llama1b":16,"qwen3b":36,"qwen14b":48}[a.preset]
     if model.config.num_hidden_layers != expected_layers:
         raise ValueError("Model layer count does not match preset; use the documented model")
@@ -61,7 +70,7 @@ def main():
     layers = [int(x) for x in a.layers.split(",")] if a.layers else intermediate_layers(model.config.num_hidden_layers, depth)
     if tok.pad_token_id is None:
         tok.pad_token_id = tok.eos_token_id
-    meta = dict(vars(a), resolved_alpha=alpha, resolved_layers=layers, torch=torch.__version__, transformers=transformers.__version__, python=platform.python_version(), model_config=model.config.to_dict(), prompt_sha256=hashlib.sha256(prefix.encode()).hexdigest(), data_sha256=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest())
+    meta = dict(vars(a), storage={k:str(v) for k,v in paths.items()}, resolved_alpha=alpha, resolved_layers=layers, torch=torch.__version__, transformers=transformers.__version__, python=platform.python_version(), model_config=model.config.to_dict(), prompt_sha256=hashlib.sha256(prefix.encode()).hexdigest(), data_sha256=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest())
     out.with_suffix(".meta.json").write_text(json.dumps(meta,indent=2,ensure_ascii=False),encoding="utf-8")
     manager = USteer(model,layers,alpha,a.scope) if a.method == "usteer" else contextlib.nullcontext()
     def sync():
