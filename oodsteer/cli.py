@@ -29,6 +29,8 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--dtype", choices=["float32", "float16", "bfloat16"], default="bfloat16")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--stop-policy", choices=["answer","question","eos"], default="answer")
+    p.add_argument("--scoring", choices=["compatible-v2","legacy-v1"], default="compatible-v2")
     p.add_argument("--chat", action="store_true", help="Optional deviation: apply model chat template")
     a = p.parse_args()
     from .paths import configure_storage
@@ -42,7 +44,8 @@ def main():
     import torch
     import transformers
     from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
-    from .data import load, prompt, extract
+    from .data import load, prompt, extract, extract_legacy
+    from .answers import make_stopper, first_response, SCORING_VERSION
     from .steering import USteer, intermediate_layers
     if a.alpha is not None and a.alpha < 0 or a.temperature < 0:
         p.error("alpha and temperature must be nonnegative")
@@ -75,7 +78,7 @@ def main():
     layers = [int(x) for x in a.layers.split(",")] if a.layers else intermediate_layers(model.config.num_hidden_layers, depth)
     if tok.pad_token_id is None:
         tok.pad_token_id = tok.eos_token_id
-    meta = dict(vars(a), dataset_source=dataset_source, model_source=model_source, storage={k:str(v) for k,v in paths.items()}, resolved_alpha=alpha, resolved_layers=layers, torch=torch.__version__, transformers=transformers.__version__, python=platform.python_version(), model_config=model.config.to_dict(), prompt_sha256=hashlib.sha256(prefix.encode()).hexdigest(), data_sha256=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest())
+    meta = dict(vars(a), scoring_version=a.scoring, termination_version="complete-answer-v2", dataset_source=dataset_source, model_source=model_source, storage={k:str(v) for k,v in paths.items()}, resolved_alpha=alpha, resolved_layers=layers, torch=torch.__version__, transformers=transformers.__version__, python=platform.python_version(), model_config=model.config.to_dict(), prompt_sha256=hashlib.sha256(prefix.encode()).hexdigest(), data_sha256=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest())
     out.with_suffix(".meta.json").write_text(json.dumps(meta,indent=2,ensure_ascii=False),encoding="utf-8")
     manager = USteer(model,layers,alpha,a.scope) if a.method == "usteer" else contextlib.nullcontext()
     def sync():
@@ -92,15 +95,20 @@ def main():
             kwargs = dict(max_new_tokens=a.max_new_tokens,do_sample=a.temperature>0,use_cache=True,pad_token_id=tok.pad_token_id)
             if a.temperature>0:
                 kwargs.update(temperature=a.temperature,top_p=1.0,top_k=0)
+            stopper, criteria = make_stopper(tok, inputs.input_ids.shape[1], a.task, a.stop_policy)
+            kwargs["stopping_criteria"] = criteria
+            if a.temperature == 0:
+                kwargs.update(temperature=1.0, top_p=1.0, top_k=50)
             sync()
             start = time.perf_counter()
             result = model.generate(**inputs,**kwargs)
             sync()
             seconds = time.perf_counter()-start
             tokens = result[0,inputs.input_ids.shape[1]:]
-            generated = tok.decode(tokens,skip_special_tokens=True).split("\nQ:")[0]
-            answer = extract(generated,a.task)
-            record = dict(id=row["id"],gold=row["answer"],prediction=answer,correct=answer==row["answer"],text=generated,tokens=len(tokens),seconds=seconds,truncated=len(tokens)==a.max_new_tokens)
+            generated = tok.decode(tokens,skip_special_tokens=True)
+            answer = (extract_legacy if a.scoring == "legacy-v1" else extract)(generated,a.task)
+            reason = stopper.reason or ("length" if len(tokens)==a.max_new_tokens else "eos")
+            record = dict(id=row["id"],gold=row["answer"],prediction=answer,correct=answer==row["answer"],text=generated,tokens=len(tokens),seconds=seconds,truncated=reason=="length", stop_reason=reason, scoring_version=a.scoring, answer_text=first_response(generated))
             f.write(json.dumps(record,ensure_ascii=False)+"\n")
             f.flush()
             print(f"{i+1}/{len(rows)} correct={record['correct']} tokens={len(tokens)}",flush=True)

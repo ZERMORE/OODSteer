@@ -174,3 +174,21 @@ python -m unittest discover -s tests -v
 若历史文件实际在 `/mnt/data/wxh/wdl`，可用 `--data-root /mnt/data/wxh/wdl`，或显式提供旧 recipe / checkpoint 路径。不同根目录的缓存不会自动混用。
 
 Conda 环境统一命名为 `oodsteer`。先执行 `source scripts/server_env.sh`，脚本将数据盘的 `conda/envs` 加入 `CONDA_ENVS_PATH`，再使用 `conda create -n oodsteer` 和 `conda activate oodsteer`。新环境仍落在 `/home/wxh/wdl/data/conda/envs/oodsteer`。该操作不重命名或迁移服务器已有环境。
+
+## 评分和终止规则修复（compatible-v2）
+
+默认评分升级为 compatible-v2：识别同行/换行的新 Q: 边界；GSM8K 支持数值 boxed 与显式答案标记；选择题支持 So, the answer is / The correct answer is 等明确字母格式，不把冠词 a 当选项。不猜测推理过程中的数字，不将任意末尾数字当答案，非数值 boxed 仍判解析失败。同一回答取第一个明确答案，与首次完整答案停止的生成规则保持一致。
+
+默认 --stop-policy answer：完整 boxed、完整选项、带终结分隔符的数值答案或新 Q: 出现后停止；生成中的数字未完整时不提前截断（如120到120.5）。仅对生成部分做检查，忽略few-shot prompt。保存完整原始生成 text、answer_text、stop_reason 和 scoring_version；length 才记为截断。规则一致应用于 Standard 与 USteer。
+
+这是修复后的评测协议，与论文严格格式协议不同，应单独报告，不能混用两种评分的准确率。可用 --scoring legacy-v1 --stop-policy eos 复查旧协议。--stop-policy question 仅在新题时停止，允许回答内继续修正；eos 保留模型原始停止方式。早停会改变长度、时延和后续答案修正，重新生成结果应放在新run中。
+
+已有结果无需重新生成：
+
+```bash
+bash run.sh rescore /home/wxh/wdl/data/results/OODSteer/main-20261122-094509-127468/qwen3b
+```
+
+在输入目录下新建 compatible-v2/，不覆盖原文件；previous_prediction/previous_correct 保留旧评分，并记录源文件SHA256及继承的生成配置。汇总标明complete，GSM8K-USteer的282题仍为不完整。历史耗时/截断标志保持原状，重评分不等同于重新执行早停。
+
+新实验仍使用 `bash run.sh smoke` 和 `bash run.sh main`，自动启用修复规则。新评分采用首个明确答案，与先前audit中“最后一个明确答案”的诊断数字可能不同。

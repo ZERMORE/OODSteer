@@ -53,6 +53,7 @@ def experiment_command(a, task, method, output, dtype):
            "--prompt-file", str(ROOT / "prompts" / f"{task}.txt"),
            "--dtype", dtype, "--max-new-tokens", str(a.max_new_tokens),
            "--output", str(output)]
+    cmd += ["--stop-policy", getattr(a,"stop_policy","answer"), "--scoring", getattr(a,"scoring","compatible-v2")]
     if a.action == "smoke":
         cmd += ["--limit", "3"]
     if a.reuse_recipe:
@@ -71,6 +72,8 @@ def main():
     p.add_argument("--dtype", default="auto", choices=["auto","bfloat16","float16","float32"])
     p.add_argument("--max-new-tokens", type=int, default=512)
     p.add_argument("--reuse-recipe")
+    p.add_argument("--stop-policy",choices=["answer","question","eos"],default="answer")
+    p.add_argument("--scoring",choices=["compatible-v2","legacy-v1"],default="compatible-v2")
     a = p.parse_args()
     if a.run_name and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", a.run_name):
         p.error("run-name must be a simple directory name")

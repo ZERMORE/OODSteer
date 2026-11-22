@@ -6,7 +6,7 @@ ACTION="${1:-help}"
 if [[ "$#" -gt 0 ]]; then shift; fi
 case "$ACTION" in
   help|-h|--help)
-    echo 'Usage: bash run.sh {setup|check|smoke|main} [options]'
+    echo 'Usage: bash run.sh {setup|check|smoke|main|rescore} [options]'
     echo 'setup: create/update conda environment oodsteer and install dependencies'
     echo 'check: verify environment, GPU and tests'
     echo 'smoke: check and run 3 GSM8K examples with Standard + USteer'
@@ -14,7 +14,7 @@ case "$ACTION" in
     echo 'Options for check/smoke/main: --gpu 0 --tasks gsm8k csqa aqua --run-name NAME'
     echo 'Default model: Qwen/Qwen2.5-3B-Instruct. All data: /home/wxh/wdl/data'
     exit 0 ;;
-  setup|check|smoke|main) ;;
+  setup|check|smoke|main|rescore) ;;
   *) echo "Unknown action: $ACTION" >&2; exit 2 ;;
 esac
 source "$ROOT/scripts/server_env.sh"
@@ -37,5 +37,8 @@ if [[ "$ACTION" == setup ]]; then
   "$CONDA_BIN" run --no-capture-output -n oodsteer python -m pip check
   echo 'Setup complete. Next: bash run.sh smoke'
 else
+  if [[ "$ACTION" == rescore ]]; then
+    exec "$CONDA_BIN" run --no-capture-output -n oodsteer python -m oodsteer.rescore "$@"
+  fi
   exec "$CONDA_BIN" run --no-capture-output -n oodsteer python "$ROOT/scripts/server.py" "$ACTION" "$@"
 fi

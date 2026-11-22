@@ -21,3 +21,7 @@
 ## 统一启动入口
 
 新增 run.sh 与 scripts/server.py，支持 setup/check/smoke/main。新增任务选择、实验参数和真实子进程失败日志的 3 项检查，总计 9 项测试。未运行 GPU 模型实验；本机 WSL Bash 不可用，Shell/Conda 入口尚需服务器首次执行验证。
+
+## 评分与生成终止修复
+
+14项测试在本地 transformers 4.46.3 / torch 2.3.0+cu121 环境全部通过。包括随机初始化 tiny Llama 的真实 generate + 强制逐字符输出：确认不会在120时提前截断120.5，会在完整答案后停止；测试无需下载权重。已有主实验四个结果文件已在暂存目录验证重评分：CSQA Standard 77.4775%，USteer 76.6585%；GSM8K Standard 84.2305%，USteer前282题84.7518%。新评分取首个明确答案，不等同于此前audit的最后答案诊断规则。未运行服务器真实模型早停实验。

@@ -7,7 +7,7 @@ COUNTS = {"csqa":1221, "strategyqa":229, "gsm8k":1319, "aqua":254}
 MARKERS = {"csqa":"So the answer is", "strategyqa":"So the answer is", "gsm8k":"The answer is", "aqua":"The answer is"}
 
 
-def extract(text, task):
+def extract_legacy(text, task):
     marker = MARKERS[task]
     matches = list(re.finditer(re.escape(marker), text, re.I))
     if not matches:
@@ -110,3 +110,7 @@ def prompt(row, task, prefix):
     if row.get("choices"):
         question += " " + " ".join(row["choices"])
     return prefix.rstrip() + "\n\nQ: " + question + "\nA:"
+
+
+# Public scorer used by inference and regrading. Legacy protocol stays available.
+from .answers import extract
