@@ -12,6 +12,7 @@ case "$ACTION" in
     echo 'smoke: check and run 3 GSM8K examples with Standard + USteer'
     echo 'main: check and run complete datasets with Standard + USteer'
     echo 'Options for check/smoke/main: --gpu 0 --tasks gsm8k csqa aqua --run-name NAME'
+    echo 'Background: bash run.sh main --gpu 0 --background'
     echo 'Default model: Qwen/Qwen2.5-3B-Instruct. All data: /home/wxh/wdl/data'
     exit 0 ;;
   setup|check|smoke|main|rescore) ;;

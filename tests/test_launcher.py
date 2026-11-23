@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location("oodsteer_server",Path(__file__).resolve().parents[1]/"scripts/server.py")
 server=importlib.util.module_from_spec(spec)
@@ -37,3 +39,29 @@ class LauncherTests(unittest.TestCase):
                 server.command([sys.executable,"-u","-c","print('diagnostic'); raise SystemExit(7)"],log)
             self.assertEqual(ctx.exception.returncode,7)
             self.assertIn("diagnostic",log.read_text())
+
+    def test_background_launch(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, CUDA_VISIBLE_DEVICES="3"):
+            paths={"logs":Path(tmp)}
+            args=argparse.Namespace(action="main",run_name="test-gpu3")
+            with patch.object(server.subprocess,"Popen") as popen:
+                popen.return_value.pid=12345
+                server.launch_background(args,paths,["main","--gpu","3","--background","--run-name","test-gpu3"])
+                positional,kw=popen.call_args
+                self.assertNotIn("--background",positional[0])
+                self.assertTrue(kw["start_new_session"])
+                self.assertEqual(kw["stdin"],subprocess.DEVNULL)
+                self.assertEqual(kw["env"]["CUDA_VISIBLE_DEVICES"],"3")
+                self.assertEqual((Path(tmp)/"background/test-gpu3.pid").read_text().strip(),"12345")
+                with self.assertRaises(FileExistsError):
+                    server.launch_background(args,paths,["main","--background"])
+
+    def test_status_record(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"status.json"
+            with patch.dict(os.environ,OODSTEER_BACKGROUND_STATUS=str(path)):
+                server.write_status("failed","test failure")
+            result=json.loads(path.read_text())
+            self.assertEqual(result["state"],"failed")
+            self.assertEqual(result["error"],"test failure")

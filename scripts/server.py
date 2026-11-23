@@ -61,9 +61,47 @@ def experiment_command(a, task, method, output, dtype):
     return cmd
 
 
+def launch_background(a, paths, argv):
+    if a.action not in ("smoke", "main"):
+        raise ValueError("--background supports smoke/main only")
+    name = a.run_name or f"{a.action}-{datetime.now():%Y%m%d-%H%M%S-%f}"
+    directory=paths["logs"] / "background"
+    directory.mkdir(parents=True,exist_ok=True)
+    log=directory/f"{name}.log"
+    pid_file=directory/f"{name}.pid"
+    status=directory/f"{name}.status.json"
+    if any(path.exists() for path in (log,pid_file,status)):
+        raise FileExistsError(f"Background run name already used: {name}")
+    args=[arg for arg in argv if arg != "--background"]
+    if a.run_name is None:
+        args += ["--run-name",name]
+    env=dict(os.environ, OODSTEER_BACKGROUND_STATUS=str(status))
+    with log.open("x",encoding="utf-8") as output:
+        process=subprocess.Popen([sys.executable,"-u",str(Path(__file__).resolve()),*args],
+            cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=output,
+            stderr=subprocess.STDOUT,start_new_session=True)
+    pid_file.write_text(str(process.pid)+"\n",encoding="utf-8")
+    # Child owns status updates. Its PID also identifies its new process group.
+    print(f"Submitted: {name}\nPID / PGID: {process.pid}\nLog: {log}\nStatus: {status}\nPID file: {pid_file}",flush=True)
+    print(f"Follow: tail -f {log}",flush=True)
+    print("Submission succeeded; inspect log/status to confirm checks and experiment startup.",flush=True)
+
+
+def write_status(state, error=None):
+    location=os.environ.get("OODSTEER_BACKGROUND_STATUS")
+    if not location:
+        return
+    value=dict(state=state,pid=os.getpid(),updated=datetime.now().isoformat(),error=error)
+    path=Path(location)
+    temp=path.with_suffix(".tmp")
+    temp.write_text(json.dumps(value,indent=2),encoding="utf-8")
+    temp.replace(path)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=["check", "smoke", "main"])
+    p.add_argument("--background", action="store_true", help="Detach main/smoke from SSH; save combined log and PID")
     p.add_argument("--gpu", help="CUDA_VISIBLE_DEVICES; otherwise inherit allocation")
     p.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
     p.add_argument("--preset", default="qwen3b", choices=["llama1b","qwen3b","qwen14b"])
@@ -82,6 +120,11 @@ def main():
     if a.gpu is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = a.gpu
     paths = configure_storage()
+    if a.background:
+        launch_background(a, paths, sys.argv[1:])
+        return
+    write_status("running")
+    print("GPU visibility:", os.environ.get("CUDA_VISIBLE_DEVICES", "inherited/all visible"), flush=True)
     print("Data root:", paths["root"], "HF_HOME:", os.environ["HF_HOME"], flush=True)
     # Check every required dependency and the actual GPU before experiment output.
     command([sys.executable,"-m","pip","check"])
@@ -118,6 +161,15 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+        write_status("complete")
     except subprocess.CalledProcessError as exc:
+        write_status("failed", str(exc))
         print(f"Command failed (exit {exc.returncode}); stopped. Existing outputs preserved.",file=sys.stderr)
         sys.exit(exc.returncode if exc.returncode>0 else 1)
+
+    except KeyboardInterrupt:
+        write_status("interrupted")
+        sys.exit(130)
+    except Exception as exc:
+        write_status("failed", str(exc))
+        raise

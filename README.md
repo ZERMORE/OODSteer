@@ -192,3 +192,26 @@ bash run.sh rescore /home/wxh/wdl/data/results/OODSteer/main-20261122-094509-127
 在输入目录下新建 compatible-v2/，不覆盖原文件；previous_prediction/previous_correct 保留旧评分，并记录源文件SHA256及继承的生成配置。汇总标明complete，GSM8K-USteer的282题仍为不完整。历史耗时/截断标志保持原状，重评分不等同于重新执行早停。
 
 新实验仍使用 `bash run.sh smoke` 和 `bash run.sh main`，自动启用修复规则。新评分采用首个明确答案，与先前audit中“最后一个明确答案”的诊断数字可能不同。
+
+## 指定 GPU 与断开 SSH 后继续运行
+
+```bash
+cd /home/wxh/projects/OODSteer
+git pull --ff-only origin main
+bash run.sh smoke --gpu 3
+bash run.sh main --gpu 3 --background --run-name qwen3b-v2-gpu3
+```
+
+--gpu 3 将 CUDA_VISIBLE_DEVICES 设为3，进程内的cuda:0对应所选可见卡；默认仍是单卡推理。多卡可见不代表会并行分片。不传--gpu则继承服务器已有分配。首次启动前可用nvidia-smi确认所选卡可用。
+
+--background用独立会话启动实际Python实验进程，标准输入断开，stdout/stderr写文件，父启动命令立即返回。不需要手动nohup或保持SSH连接。后台启动仅支持main/smoke。服务端策略主动清理用户进程时仍可能终止，应遵守集群任务管理要求。
+
+```bash
+# 总日志含环境检查、各任务输出与最终汇总；Ctrl+C只退出tail。
+tail -f /home/wxh/wdl/data/logs/OODSteer/background/qwen3b-v2-gpu3.log
+cat /home/wxh/wdl/data/logs/OODSteer/background/qwen3b-v2-gpu3.status.json
+```
+
+同目录保存.pid文件。status记录running/complete/failed；强制终止或机器故障可能使状态停留running，需同时核对ps。原来的分任务日志、结果仍保存在logs/OODSteer/<run>/和results/OODSteer/<run>/。后台提交成功不代表实验检查通过，必须查看总日志。相同run-name不覆盖旧日志，重跑应换名。
+
+如需主动停止整个实验，先从.pid读取PID，用 `ps -o pid,pgid,args -p PID` 确认进程及PGID与启动时一致，然后执行 `kill -INT -- -PGID` 向该实验独立进程组发送中断；已逐题保存的结果保留，目前不支持断点续跑。不要只杀掉conda父进程。
